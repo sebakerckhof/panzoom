@@ -81,6 +81,7 @@ function createPanZoom(domElement, options) {
   // cache mouse coordinates here
   var mouseX
   var mouseY
+  var touches = 0
 
   var pinchZoomLength
 
@@ -455,14 +456,19 @@ function createPanZoom(domElement, options) {
 
   function onTouch(e) {
     beforeTouch(e);
-    if (e.touches.length === 1) {
-      return handleSingleFingerTouch(e, e.touches[0])
-    } else if (e.touches.length === 2) {
-      // handleTouchMove() will care about pinch zoom.
-      pinchZoomLength = getPinchZoomLength(e.touches[0], e.touches[1])
-      multitouch  = true
-      startTouchListenerIfNeeded()
+    cacheTouchData(e);
+    startTouchListenerIfNeeded();
+  }
+
+  function cacheTouchData(e) {
+    touches = e.touches;
+    var offset = getAverageOffset(e.touches);
+    mouseX = offset.x
+    mouseY = offset.y
+    if (e.touches.length > 1) {
+      pinchZoomLength = getPinchZoomLength(e.touches[0], e.touches[1]);
     }
+    multitouch = touches.length > 1;
   }
 
   function beforeTouch(e) {
@@ -476,15 +482,6 @@ function createPanZoom(domElement, options) {
     e.preventDefault()
   }
 
-  function handleSingleFingerTouch(e) {
-    var touch = e.touches[0]
-    var offset = getOffsetXY(touch)
-    mouseX = offset.x
-    mouseY = offset.y
-
-    startTouchListenerIfNeeded()
-  }
-
   function startTouchListenerIfNeeded() {
     if (!touchInProgress) {
       touchInProgress = true
@@ -495,29 +492,28 @@ function createPanZoom(domElement, options) {
   }
 
   function handleTouchMove(e) {
-    if (e.touches.length === 1) {
-      e.stopPropagation()
-      var touch = e.touches[0]
+    if (touches.length !== e.touches.length) {
+      cacheTouchData(e);
+    }
 
-      var offset = getOffsetXY(touch)
+    e.stopPropagation()
+    e.preventDefault()
 
-      var dx = offset.x - mouseX
-      var dy = offset.y - mouseY
+    var offset = getAverageOffset(e.touches);
+    var dx = offset.x - mouseX
+    var dy = offset.y - mouseY
+    if (dx !== 0 && dy !== 0) {
+      triggerPanStart()
+    }
+    mouseX = offset.x
+    mouseY = offset.y
+    var point = transformToScreen(dx, dy)
+    internalMoveBy(point.x, point.y)
 
-      if (dx !== 0 && dy !== 0) {
-        triggerPanStart()
-      }
-      mouseX = offset.x
-      mouseY = offset.y
-      var point = transformToScreen(dx, dy)
-      internalMoveBy(point.x, point.y)
-    } else if (e.touches.length === 2) {
-      // it's a zoom, let's find direction
-      multitouch = true
+    if (multitouch) {
       var t1 = e.touches[0]
       var t2 = e.touches[1]
       var currentPinchLength = getPinchZoomLength(t1, t2)
-
       var scaleMultiplier = 1
 
       if (realPinch) {
@@ -532,15 +528,8 @@ function createPanZoom(domElement, options) {
 
         scaleMultiplier = getScaleMultiplier(delta)
       }
-
-      mouseX = (t1.clientX + t2.clientX)/2
-      mouseY = (t1.clientY + t2.clientY)/2
-
       publicZoomTo(mouseX, mouseY, scaleMultiplier)
-
       pinchZoomLength = currentPinchLength
-      e.stopPropagation()
-      e.preventDefault()
     }
   }
 
@@ -655,6 +644,17 @@ function createPanZoom(domElement, options) {
     }
   }
 
+  function getAverageOffset(touches) {
+    var averageX = 0;
+    var averageY = 0;
+    for (var i = 0; i < touches.length; i++) {
+      averageX += touches[i].clientX;
+      averageY += touches[i].clientY;
+    }
+    
+    return getOffsetXY({ clientX: averageX / touches.length, clientY: averageY / touches.length });
+  }
+
   function getOffsetXY(e) {
     var offsetX, offsetY;
     // I tried using e.offsetX, but that gives wrong results for svg, when user clicks on a path.
@@ -662,7 +662,7 @@ function createPanZoom(domElement, options) {
     offsetX = e.clientX - ownerRect.left
     offsetY = e.clientY - ownerRect.top
 
-    return {x: offsetX, y: offsetY};
+    return { x: offsetX, y: offsetY };
   }
 
   function smoothZoom(clientX, clientY, scaleMultiplier) {
