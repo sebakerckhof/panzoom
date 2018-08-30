@@ -99,6 +99,7 @@ function createPanZoom(domElement, options) {
   var zoomToAnimation
 
   var multitouch
+  var paused = false
 
   listenForEvents()
 
@@ -109,8 +110,30 @@ function createPanZoom(domElement, options) {
     centerOn: centerOn,
     zoomTo: publicZoomTo,
     zoomAbs: zoomAbs,
+    smoothZoom: smoothZoom,
     getTransform: getTransformModel,
-    showRectangle: showRectangle
+    showRectangle: showRectangle,
+
+    pause: pause,
+    resume: resume,
+    isPaused: isPaused,
+  }
+
+  function pause() {
+    releaseEvents()
+    paused = true
+  }
+
+  function resume() {
+    if (paused) {
+      console.log('resujme')
+      listenForEvents()
+      paused = false
+    }
+  }
+
+  function isPaused() {
+    return paused;
   }
 
   function showRectangle(rect) {
@@ -371,21 +394,7 @@ function createPanZoom(domElement, options) {
   }
 
   function dispose() {
-    wheel.removeWheelListener(owner, onMouseWheel)
-    owner.removeEventListener('mousedown', onMouseDown)
-    owner.removeEventListener('keydown', onKeyDown)
-    owner.removeEventListener('dblclick', onDoubleClick)
-    if (frameAnimation) {
-      window.cancelAnimationFrame(frameAnimation)
-      frameAnimation = 0
-    }
-
-    smoothScroll.cancel()
-
-    releaseDocumentMouse()
-    releaseTouches()
-
-    triggerPanEnd()
+    releaseEvents();
   }
 
   function listenForEvents() {
@@ -399,6 +408,26 @@ function createPanZoom(domElement, options) {
     wheel.addWheelListener(owner, onMouseWheel)
 
     makeDirty()
+  }
+
+  function releaseEvents() {
+    wheel.removeWheelListener(owner, onMouseWheel)
+    owner.removeEventListener('mousedown', onMouseDown)
+    owner.removeEventListener('keydown', onKeyDown)
+    owner.removeEventListener('dblclick', onDoubleClick)
+    owner.removeEventListener('touchstart', onTouch)
+
+    if (frameAnimation) {
+      window.cancelAnimationFrame(frameAnimation)
+      frameAnimation = 0
+    }
+
+    smoothScroll.cancel()
+
+    releaseDocumentMouse()
+    releaseTouches()
+
+    triggerPanEnd()
   }
 
 
@@ -762,3 +791,74 @@ function rigidScroll() {
     cancel: noop
   }
 }
+
+
+function autoRun() {
+  if (typeof document === 'undefined') return
+
+  var scripts = document.getElementsByTagName('script');
+  if (!scripts) return;
+  var panzoomScript;
+
+  Array.from(scripts).forEach(function(x) {
+    if (x.src && x.src.match(/\bpanzoom(\.min)?\.js/)) {
+      panzoomScript = x
+    }
+  })
+
+  if (!panzoomScript) return;
+
+  var query = panzoomScript.getAttribute('query')
+  if (!query) return;
+
+  var globalName = panzoomScript.getAttribute('name') || 'pz'
+  var started = Date.now()
+
+  tryAttach();
+
+  function tryAttach() {
+    var el = document.querySelector(query)
+    if (!el) {
+      var now = Date.now()
+      var elapsed = now - started;
+      if (elapsed < 2000) {
+        // Let's wait a bit
+        setTimeout(tryAttach, 100);
+        return;
+      }
+      // If we don't attach within 2 seconds to the target element, consider it a failure
+      console.error('Cannot find the panzoom element', globalName)
+      return
+    }
+    var options = collectOptions(panzoomScript)
+    console.log(options)
+    window[globalName] = createPanZoom(el, options);
+  }
+
+  function collectOptions(script) {
+    var attrs = script.attributes;
+    var options = {};
+    for(var i = 0; i < attrs.length; ++i) {
+      var attr = attrs[i];
+      var nameValue = getPanzoomAttributeNameValue(attr);
+      if (nameValue) {
+        options[nameValue.name] = nameValue.value
+      }
+    }
+
+    return options;
+  }
+
+  function getPanzoomAttributeNameValue(attr) {
+    if (!attr.name) return;
+    var isPanZoomAttribute = attr.name[0] === 'p' && attr.name[1] === 'z' && attr.name[2] === '-';
+
+    if (!isPanZoomAttribute) return;
+
+    var name = attr.name.substr(3)
+    var value = JSON.parse(attr.value);
+    return {name: name, value: value};
+  }
+}
+
+autoRun();
